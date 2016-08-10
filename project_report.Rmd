@@ -1,0 +1,163 @@
+---
+title: "Practical Machine Learning: Prediction Project"
+author: "ARadu"
+date: "August 9, 2016"
+output: html_document
+---
+
+Excercising Correctness 
+=======================================
+
+## Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit data on how people perform their work-outs is colllected. The goal of this project is to use this data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in order to find out how the subjects perform their exercises. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (Weight Lifting Exercise Dataset section). 
+
+
+## Data
+Two datasets are available: 
+
+- training data, downloaded from 
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>   
+
+- testing data, downloaded from  <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>   
+
+### Downloading and reading data
+Data is downloaded and saved in the current folde under ".\data"" folder. The data is read using the following R code:
+```{r}
+training_data <- read.csv("./pml-training.csv")
+testing_data <- read.csv("./pml-testing.csv")
+```
+
+### Exploratory data analysis
+A summary of the data and the first few lines are analyzed. The results are hidden due to the large and unclear view in the report. 
+```{r, results = "hide"}
+summary(training_data)
+head(training_data)
+```
+
+### Data Cleaning
+Several columns seem to show numerous NA values, therefore data must be cleaned before proceding with the analysis. Columns with NA values or empty fields are deleted.
+```{r}
+NAcounts_training = rep(0, times = dim(training_data)[2])
+NAcounts_testing = rep(0, times = dim(training_data)[2])
+
+for (icol in 1:dim(training_data)[2]){
+      NAcounts_training[icol] <- max(sum(is.na(training_data[[icol]])), sum(training_data[[icol]]==""), na.rm = TRUE) # NA and empty values in training data
+      NAcounts_testing[icol] <- max(sum(is.na(testing_data[[icol]])), sum(testing_data[[icol]]==""), na.rm = TRUE) # NA and empty values in testing data
+}
+
+NAcounts = NAcounts_testing + NAcounts_training
+GoodCols <- NAcounts > 0
+training_clean <- training_data[,which(GoodCols == FALSE)]
+testing_clean <- testing_data[,which(GoodCols == FALSE)]
+```
+In addition, the first 7 non-numerical columns are also removed - I will only use the revelant covariates in the rest of the fields in the machine-learning algorithm.
+```{r}
+training_clean <- training_clean[,8:dim(training_clean)[2]]
+testing_clean <- testing_clean[,8:dim(testing_clean)[2]]
+```
+We will save the testing data for the final test and for the purpose of building our model we split the trainign dataset in two subsets:   
+
+- training set = 70% of the clean training dataset   
+
+- testing set = rest of 30% of the clean trainign dataset
+```{r message=FALSE}
+library(caret)
+inTrain <- createDataPartition(y = training_clean$classe ,p = 0.7, list = FALSE)
+training <- training_clean[inTrain,]
+testing <- training_clean[-inTrain,]
+```
+
+## Building Prediction Models
+Four models are built using different agorithms and their accuracy is compared. Since running the models for our data with so many covariates is time-intensive, we saved the results and for the purpose of the report we will just load them. 
+
+### Method 1: Generalized Boosted Regression Models
+```{r eval=FALSE}
+M1 <- train(classe ~., data = training, method = "gbm")
+```
+
+### Method 2: Random Forest Modeling 
+```{r eval=FALSE}
+M2 <- train(classe ~., data = training, method = "rf")
+```
+
+### Method 3: Decision Trees Modeling 
+```{r eval=FALSE}
+M3 <- train(classe ~., data = training, method = "rpart")
+```
+
+### Method 4: Linear Discriminand Analysis
+```{r eval=FALSE}
+M4 <- train(classe ~., data = training, method = "lda")
+save(M1, M2, M3, M4, file = "ModelResults.RData")
+```
+
+### Model Selection
+The accuracy of all methods is calculated based on the predictions done on the testing set.
+```{r message=FALSE}
+load(file = "ModelResults.RData")
+P1 <- predict(M1, newdata = testing)
+P2 <- predict(M2, newdata = testing)
+P3 <- predict(M3, newdata = testing)
+P4 <- predict(M4, newdata = testing)
+
+ModelResults <- data.frame(Method1 = confusionMatrix(P1, testing$classe)$overall[1],
+Method2 = confusionMatrix(P2, testing$classe)$overall[1],
+Method3 = confusionMatrix(P3, testing$classe)$overall[1],
+Method4 = confusionMatrix(P4, testing$classe)$overall[1])
+ModelResults
+```
+
+Methods 1 and 2 have the largest accuracies. Therefore, we will try to combine these two in a new model M12, by combining them using Random Forests, and test again for accuracy.
+```{r}
+P12 <- data.frame(P1, P2, classe = testing$classe)
+M12 <- train(classe ~., method = "rf", data = P12)
+P <- predict(M12, P12)
+ModelResults$Method12 <- confusionMatrix(P, testing$classe)$overall[1]
+p <- barplot(as.matrix(ModelResults), main = "Accuracy Comparison", xlab = "Method", ylab = "Accuracy", names.arg = c("M1: gbm", "M2: rf", "M3: rpart", "M4: lda", "M12: gbm+rf"))
+text(p, 0, round(as.matrix(ModelResults), 4), cex = 1, pos = 3)
+```
+
+The combined method has not improved the accuracy. Therefore, Method 2: Random Forests is chosen for our purpose. The random forest method reduces overfitting and is good for nonlinear features. The first few lines in the decision tree in the Random Forest model are shown below: 
+```{r}
+head(getTree(M2$finalModel, k = 2))
+```
+
+We can also see what covariates are the most five important in the Random Forest algorithm.
+```{r}
+ImpCov <- varImp(M2)$importance
+ImpCov$Names <- rownames(ImpCov)
+ImpCov <- ImpCov[order(ImpCov$Overall, decreasing = TRUE),]
+ImpCov$Names[1:5]
+```
+
+The relation between the five most relevant covariates and the outcome "classe" is shown in the following plot. 
+```{r}
+featurePlot(training[,ImpCov$Names[1:5]],training$classe, plot = "pairs")
+```
+
+The confusion matrix to test the results for the method selected isn shown below.
+```{r}
+confusionMatrix(P2, testing$classe)
+```
+
+### Cross Validation
+Three-fold validation is performed for the method chosen, i.e. for the random forest. This type of validation is important especially for this method since this method often provides over-fitted models. The cross-validation is done using the R function "trainControl" as shown below.
+```{r eval = FALSE}
+ M2_CrossValid <- train(classe ~., data = training, method = "rf", trainControl(method = "cv", number = 3), preProcess = c("center", "scale"))
+```
+
+## Results for Submission
+The prediction for the given testing data is done uasing the selected Model 2, using random forests. The following results are submitted for the 20 test cases.
+```{r}
+P2testing <- predict(M2, newdata = testing_data)
+P2testing
+```
+
+### Conclusion
+Several machine-learning techniques are tested to build a prediction model for the work-out data. The following conclusions are reached from this prediction excersice:   
+- the random forest algorithm is performing the best among the four algorithms tested   
+- the second best-performing algorithm is the generalized regression model   
+- combining the random forest and the generalized regression models does not improve accuracy significantly    
+- the results of the prediction using the selected random forest algorithm, performs well and predicts well the "classe" for all 20 tests   
+

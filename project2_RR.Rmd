@@ -1,0 +1,121 @@
+---
+output: html_document
+---
+Consequences of Severe Weather Events in the United States
+=======================================
+Consequences in terms of population health and economical damage caused by severe weather events are studies in this report. The data used in this report is downloaded from the NOAA Storm Database. The data regarding the people health is available in terms of injuries and casualties. The economical loss data is presented in terms of crop and property economical losses. The data provided is split by type of peril and geographical adimistrations in the United States.
+
+The analysis consists in summarizing the total population affected and the total economical damage caused by severe weather events in the United States. The population affected and the total economical damage are aggregated by peril for the entire United States. These results are used to find out what type of events are affecting the population health the most and what types of events are the most damage-causing.
+
+## Data Processing
+The data is downloaded from the NOAA Storm Database. The file is saved in the working directory under the folder data.
+
+### Data Reading
+The raw data is read and saved in the following variable.
+```{r}
+ noaa <- read.csv("./data/repdata_data_StormData.csv.bz2")
+```
+
+### Exploratory Data Analysis
+A few exploratory tests are performed on the data, such as 
+
+- determining the class of the data   
+```{r}
+class(noaa)
+```
+
+- exploring the first few lines in the dataset   
+```{r}
+head(noaa)
+```
+
+- calculating a summary of the data (summary is commented out to preserve the tidiness of the report)  
+```{r}
+# summary(noaa)
+```
+
+### Data Tranformation
+The raw data needs to be clean and processed in order to be used in our analysis. The major issue with the data is regarding the economical damage. The values provided as economical damage are in terms of either USD, thousands USD, million USD or billion USD. Therefore, the entire data needs to be transformed in a unique unit in order to be processed consistently. Processed data is saved in a new variable, in which new columns are added to (1) account for the factor by which economical damage is scaled and (2) calculate the actual economical losses in USD.
+```{r}
+noaa_new <- noaa
+noaa_new["dmg_prop"] <- 0
+noaa_new["dmg_crop"] <- 0
+noaa_new["prop_factor"] <- 1
+noaa_new["crop_factor"] <- 1
+
+noaa_new$prop_factor[noaa_new$PROPDMGEXP == "k" | noaa_new$PROPDMGEXP == "K"] = 1000
+noaa_new$prop_factor[noaa_new$PROPDMGEXP == "m" | noaa_new$PROPDMGEXP == "M"] = 1000000
+noaa_new$prop_factor[noaa_new$PROPDMGEXP == "b" | noaa_new$PROPDMGEXP == "B"] = 1000000000
+
+noaa_new$crop_factor[noaa_new$CROPDMGEXP == "k" | noaa_new$CROPDMGEXP == "K"] = 1000
+noaa_new$crop_factor[noaa_new$CROPDMGEXP == "m" | noaa_new$CROPDMGEXP == "M"] = 1000000
+noaa_new$crop_factor[noaa_new$CROPDMGEXP == "b" | noaa_new$CROPDMGEXP == "B"] = 1000000000
+
+```
+
+## Results
+Two sets of results are sought:  
+
+- types of events which affected health population the most  
+
+- types of events which caused the largest economical damage  
+
+### Most Health-Population-Affecting Events
+The top 5 types of events affecting the most population in terms of injuries and casualties are plotted in the follwoing bar plot. The number of population affected is disaggregated by injuries and fatalities.
+```{r}
+noaa_inj <- with(noaa_new, aggregate(INJURIES, list(Peril = EVTYPE), FUN = "sum")) # fatalities
+noaa_fat <- with(noaa_new, aggregate(FATALITIES, list(Peril = EVTYPE), FUN = "sum")) # injuries 
+noaa_pop <- merge(noaa_inj, noaa_fat, by = "Peril", all = TRUE)
+noaa_pop["People_Affected"] <- noaa_pop$x.x+noaa_pop$x.y
+noaa_pop_order <- noaa_pop[with(noaa_pop, order(People_Affected, decreasing = TRUE)), ]
+
+pop_matrix <- t(as.matrix(noaa_pop_order[seq(1,5),c(2,3,4)]))
+
+colnames(pop_matrix) <- as.character(noaa_pop_order[seq(1,5),1])
+rownames(pop_matrix) <- c("Injuries","Casualties","Total_Population_Affected")
+
+barplot(pop_matrix[c(1,2),],cex.names = 0.75, cex.axis = 0.75,
+        main="Five Most Health-Affecting Perils",
+        xlab="Peril", ylab="Number of People Affected",
+        col=c("green","blue"),
+        legend = rownames(pop_matrix[c(1,2),])) 
+```
+
+A summary of the numbers reflecting the injuries and casualties caused by the 5 top events is shown in the table below.
+```{r}
+library(knitr)
+kable(pop_matrix, digits=0)
+```
+
+### Most Economical-Damage-Causing Events
+The top 5 types of events causing the most economical loss, in terms of crop and property loss, are plotted in the follwoing bar plot. The value of economical damage is disaggregated by crop loss and property loss and is presented in terms of million USD.
+```{r}
+noaa_new$dmg_prop <- noaa_new$prop_factor*noaa_new$PROPDMG/10^6
+noaa_new$dmg_crop <- noaa_new$crop_factor*noaa_new$CROPDMG/10^6
+
+noaa_crop <- with(noaa_new, aggregate(dmg_crop, list(Peril = EVTYPE), FUN = "sum"))
+noaa_prop <- with(noaa_new, aggregate(dmg_prop, list(Peril = EVTYPE), FUN = "sum"))
+
+noaa_damage <- merge(noaa_crop, noaa_prop, by = "Peril", all = TRUE)
+noaa_damage["Total_Damage"] <- noaa_damage$x.x+noaa_damage$x.y
+noaa_damage_order <- noaa_damage[with(noaa_damage, order(Total_Damage, decreasing = TRUE)), ]
+
+damage_matrix <- t(as.matrix(noaa_damage_order[seq(1,5),c(2,3,4)]))
+
+colnames(damage_matrix) <- as.character(noaa_damage_order[seq(1,5),1])
+rownames(damage_matrix) <- c("Crop","Property","Total_Damage")
+barplot(damage_matrix[c(1,2),],cex.names = 0.75, cex.axis = 0.75,
+          main="Five Most Damage-causing Perils",
+          xlab="Peril", ylab="Damage [M USD]",
+          col=c("green","blue"),
+          legend = rownames(damage_matrix[c(1,2),])) 
+```
+
+A summary of the values of the economical loss in million USD split by crop loss and property loss caused by the 5 top events is shown in the table below.
+```{r}
+library(knitr)
+kable(damage_matrix, digits=0)
+```
+
+### Conclusions
+Based on our analysis, tornados are the type of events with the highest impact on population health, with a total of `r max(noaa_pop$People_Affected)` of peope affected and floods are the type of events with the highest economical damage with a total `r max(noaa_damage$Total_Damage)` million USD in total damage from crop and property damage combined.
